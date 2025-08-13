@@ -7,6 +7,9 @@ import mongoSanitize from 'express-mongo-sanitize';
 import rateLimit from 'express-rate-limit';
 import morgan from 'morgan';
 import logger from './shared/utils/logger.js';
+// In main app.js
+import authRoutes from './modules/auth/auth.routes.js';
+
 
 export function setupMiddleware(app) {
   // Trust proxy
@@ -70,8 +73,7 @@ export function setupMiddleware(app) {
     max: 5,
     skipSuccessfulRequests: true
   });
-  app.use('/api/auth/login', authLimiter);
-  app.use('/api/auth/register', authLimiter);
+
   
   // Request logging
   if (process.env.NODE_ENV === 'development') {
@@ -88,7 +90,7 @@ export function setupMiddleware(app) {
     res.setHeader('X-Request-Id', req.id);
     next();
   });
-  
+  app.use('/api/auth', authRoutes);
   // Health check
   app.get('/health', (req, res) => {
     res.status(200).json({ 
