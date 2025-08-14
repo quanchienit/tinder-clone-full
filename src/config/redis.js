@@ -15,8 +15,8 @@ class RedisClient {
       // Main client for general operations
       this.client = createClient({
         socket: {
-          host: process.env.REDIS_HOST || 'localhost',
-          port: parseInt(process.env.REDIS_PORT) || 6379,
+          host: process.env.REDIS_HOST || 'redis-16009.crce178.ap-east-1-1.ec2.redns.redis-cloud.com',
+          port: parseInt(process.env.REDIS_PORT) || 16009,
           reconnectStrategy: (retries) => {
             if (retries > 10) {
               logger.error('Redis: Max reconnection attempts reached');
@@ -27,7 +27,7 @@ class RedisClient {
             return delay;
           },
         },
-        password: process.env.REDIS_PASSWORD || undefined,
+        password: process.env.REDIS_PASSWORD || "YA5!jw6QN@wkc3V",
         database: parseInt(process.env.REDIS_DB) || 0,
         commandsQueueMaxLength: 100,
       });

@@ -5,7 +5,7 @@ import { Server } from 'socket.io';
 import mongoose from 'mongoose';
 import redis from './config/redis.js';
 import { setupMiddleware } from './app.js';
-import { setupRoutes } from './routes.js';
+// import { setupRoutes } from './routes.js';
 import { setupSocketHandlers } from './modules/chat/chat.socket.js';
 import { startBackgroundJobs } from './jobs/index.js';
 import logger from './shared/utils/logger.js';
