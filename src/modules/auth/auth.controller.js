@@ -1,7 +1,7 @@
 // src/modules/auth/auth.controller.js
 import AuthService from './auth.service.js';
-import TwoFactorAuthService from './strategies/2fa.strategy.js';
-import { unlinkOAuthAccount } from './strategies/oauth.strategy.js';
+// import TwoFactorAuthService from './strategies/2fa.strategy.js';
+//import { unlinkOAuthAccount } from './strategies/oauth.strategy.js';
 import { asyncHandler } from '../../shared/utils/asyncHandler.js';
 import { 
   successResponse, 
