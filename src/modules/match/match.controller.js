@@ -62,15 +62,15 @@ class MatchController {
     );
 
     // Response message based on action and result
-    let message = "";
+    let messageResponse = "";
     if (result.match) {
-      message = "It's a Match! 🎉";
+      messageResponse = "It's a Match! 🎉";
     } else if (action === SWIPE_ACTIONS.LIKE) {
-      message = "Liked successfully";
+      messageResponse = "Liked successfully";
     } else if (action === SWIPE_ACTIONS.NOPE) {
-      message = "Passed";
+      messageResponse = "Passed";
     } else if (action === SWIPE_ACTIONS.SUPER_LIKE) {
-      message = "Super Like sent! ⭐";
+      messageResponse = "Super Like sent! ⭐";
     }
 
     return successResponse(
@@ -80,7 +80,7 @@ class MatchController {
         match: result.match,
         limits: result.limits,
       },
-      message,
+      messageResponse,
     );
   });
 

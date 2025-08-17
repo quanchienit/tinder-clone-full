@@ -122,6 +122,7 @@ class Database {
         '../modules/match/match.model.js',
         '../modules/match/swipe.model.js',
         '../modules/chat/message.model.js',
+        '../modules/notification/notification.model.js'
       ];
 
       for (const modelPath of models) {

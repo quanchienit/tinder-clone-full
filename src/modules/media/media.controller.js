@@ -270,51 +270,89 @@ class MediaController {
    */
   searchMedia = asyncHandler(async (req, res) => {
     const userId = req.user._id.toString();
-    const {
-      query = '',
-      type = 'all',
-      date_from,
-      date_to,
-      page = 1,
-      limit = 20,
-      sort_by = 'uploadedAt',
-      sort_order = 'desc'
-    } = req.query;
-
-    // This would require a media database model
-    // For now, return a placeholder response
     const searchOptions = {
-      query,
-      type,
-      dateFrom: date_from ? new Date(date_from) : null,
-      dateTo: date_to ? new Date(date_to) : null,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      sortBy: sort_by,
-      sortOrder: sort_order
+      query: req.query.query || '',
+      type: req.query.type || 'all',
+      context: req.query.context,
+      folder: req.query.folder,
+      tags: req.query.tags ? req.query.tags.split(',') : undefined,
+      dateFrom: req.query.date_from,
+      dateTo: req.query.date_to,
+      page: parseInt(req.query.page) || 1,
+      limit: parseInt(req.query.limit) || 20,
+      sortBy: req.query.sort_by || 'createdAt',
+      sortOrder: req.query.sort_order || 'desc'
     };
 
-    // Placeholder implementation
-    const results = {
-      media: [],
-      total: 0,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      hasNext: false,
-      hasPrev: false
-    };
+    const results = await MediaService.searchUserMedia(userId, searchOptions);
 
     // Track search
-    await MetricsService.trackMediaSearch(userId, query, type);
+    await MetricsService.trackMediaSearch(userId, searchOptions.query, searchOptions.type);
 
     return paginatedResponse(
-      res, 
-      results.media, 
-      results.total, 
-      results.page, 
-      results.limit,
+      res,
+      results.media,
+      results.pagination.total,
+      results.pagination.page,
+      results.pagination.limit,
       'Media search completed'
     );
+  });
+
+  /**
+   * Get user media by context
+   * @route GET /api/media/context/:context
+   * @access Private
+   */
+  getMediaByContext = asyncHandler(async (req, res) => {
+    const userId = req.user._id.toString();
+    const { context } = req.params;
+    const {
+      page = 1,
+      limit = 20,
+      type,
+      sort = 'createdAt',
+      order = 'desc'
+    } = req.query;
+
+    const options = {
+      type,
+      page: parseInt(page),
+      limit: parseInt(limit),
+      sort: { [sort]: order === 'desc' ? -1 : 1 }
+    };
+
+    const media = await MediaService.getMediaByContext(userId, context, options);
+
+    return successResponse(res, media, `${context} media retrieved successfully`);
+  });
+
+  /**
+   * Get user folders
+   * @route GET /api/media/folders
+   * @access Private
+   */
+  getUserFolders = asyncHandler(async (req, res) => {
+    const userId = req.user._id.toString();
+
+    const folders = await MediaService.getUserFolders(userId);
+
+    return successResponse(res, { folders }, 'Folders retrieved successfully');
+  });
+
+  /**
+   * Update media metadata
+   * @route PUT /api/media/:mediaId/metadata
+   * @access Private
+   */
+  updateMediaMetadata = asyncHandler(async (req, res) => {
+    const userId = req.user._id.toString();
+    const { mediaId } = req.params;
+    const updates = req.body;
+
+    const updatedMedia = await MediaService.updateMediaMetadata(mediaId, userId, updates);
+
+    return successResponse(res, updatedMedia, 'Media updated successfully');
   });
 
   /**
