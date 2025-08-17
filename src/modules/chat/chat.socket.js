@@ -111,58 +111,58 @@ class ChatSocketHandler {
  /**
   * Register all event handlers
   */
- registerEventHandlers(socket) {
-   // Message events
-   socket.on('message:send', (data) => this.handleSendMessage(socket, data));
-   socket.on('message:edit', (data) => this.handleEditMessage(socket, data));
-   socket.on('message:delete', (data) => this.handleDeleteMessage(socket, data));
-   socket.on('message:react', (data) => this.handleMessageReaction(socket, data));
-   socket.on('message:read', (data) => this.handleMarkAsRead(socket, data));
-   socket.on('message:delivered', (data) => this.handleMarkAsDelivered(socket, data));
+registerEventHandlers(socket) {
+  // Message events
+  socket.on(SOCKET_EVENTS.MESSAGE_SEND, (data) => this.handleSendMessage(socket, data));
+  socket.on(SOCKET_EVENTS.MESSAGE_EDIT, (data) => this.handleEditMessage(socket, data));
+  socket.on(SOCKET_EVENTS.MESSAGE_DELETED, (data) => this.handleDeleteMessage(socket, data));
+  socket.on(SOCKET_EVENTS.MESSAGE_REACT, (data) => this.handleMessageReaction(socket, data));
+  socket.on(SOCKET_EVENTS.MESSAGE_READ, (data) => this.handleMarkAsRead(socket, data));
+  socket.on(SOCKET_EVENTS.MESSAGE_DELIVERED, (data) => this.handleMarkAsDelivered(socket, data));
 
-   // Typing events
-   socket.on('typing:start', (data) => this.handleTypingStart(socket, data));
-   socket.on('typing:stop', (data) => this.handleTypingStop(socket, data));
+  // Typing events
+  socket.on(SOCKET_EVENTS.TYPING_START, (data) => this.handleTypingStart(socket, data));
+  socket.on(SOCKET_EVENTS.TYPING_STOP, (data) => this.handleTypingStop(socket, data));
 
-   // Voice/Video events
-   socket.on('call:initiate', (data) => this.handleCallInitiate(socket, data));
-   socket.on('call:accept', (data) => this.handleCallAccept(socket, data));
-   socket.on('call:reject', (data) => this.handleCallReject(socket, data));
-   socket.on('call:end', (data) => this.handleCallEnd(socket, data));
-   socket.on('call:ice-candidate', (data) => this.handleIceCandidate(socket, data));
-   socket.on('call:signal', (data) => this.handleCallSignal(socket, data));
+  // Voice/Video events
+  socket.on(SOCKET_EVENTS.CALL_INITIATE, (data) => this.handleCallInitiate(socket, data));
+  socket.on(SOCKET_EVENTS.CALL_ACCEPT, (data) => this.handleCallAccept(socket, data));
+  socket.on(SOCKET_EVENTS.CALL_REJECT, (data) => this.handleCallReject(socket, data));
+  socket.on(SOCKET_EVENTS.CALL_END, (data) => this.handleCallEnd(socket, data));
+  socket.on(SOCKET_EVENTS.CALL_ICE_CANDIDATE, (data) => this.handleIceCandidate(socket, data));
+  socket.on(SOCKET_EVENTS.CALL_SIGNAL, (data) => this.handleCallSignal(socket, data));
 
-   // Media events
-   socket.on('media:upload', (data) => this.handleMediaUpload(socket, data));
-   socket.on('media:download', (data) => this.handleMediaDownload(socket, data));
+  // Media events
+  socket.on(SOCKET_EVENTS.MEDIA_UPLOAD, (data) => this.handleMediaUpload(socket, data));
+  socket.on(SOCKET_EVENTS.MEDIA_DOWNLOAD, (data) => this.handleMediaDownload(socket, data));
 
-   // Chat management
-   socket.on('chat:load-history', (data) => this.handleLoadHistory(socket, data));
-   socket.on('chat:clear', (data) => this.handleClearChat(socket, data));
-   socket.on('chat:export', (data) => this.handleExportChat(socket, data));
-   socket.on('chat:search', (data) => this.handleSearchMessages(socket, data));
+  // Chat management
+  socket.on(SOCKET_EVENTS.CHAT_LOAD_HISTORY, (data) => this.handleLoadHistory(socket, data));
+  socket.on(SOCKET_EVENTS.CHAT_CLEAR, (data) => this.handleClearChat(socket, data));
+  socket.on(SOCKET_EVENTS.CHAT_EXPORT, (data) => this.handleExportChat(socket, data));
+  socket.on(SOCKET_EVENTS.CHAT_SEARCH, (data) => this.handleSearchMessages(socket, data));
 
-   // Presence events
-   socket.on('presence:update', (data) => this.handlePresenceUpdate(socket, data));
-   socket.on('presence:get', (data) => this.handleGetPresence(socket, data));
+  // Presence events
+  socket.on(SOCKET_EVENTS.PRESENCE_UPDATE, (data) => this.handlePresenceUpdate(socket, data));
+  socket.on(SOCKET_EVENTS.PRESENCE_GET, (data) => this.handleGetPresence(socket, data));
 
-   // Location sharing
-   socket.on('location:share', (data) => this.handleShareLocation(socket, data));
-   socket.on('location:stop', (data) => this.handleStopLocationSharing(socket, data));
+  // Location sharing
+  socket.on(SOCKET_EVENTS.LOCATION_SHARE, (data) => this.handleShareLocation(socket, data));
+  socket.on(SOCKET_EVENTS.LOCATION_STOP, (data) => this.handleStopLocationSharing(socket, data));
 
-   // Voice messages
-   socket.on('voice:record', (data) => this.handleVoiceRecord(socket, data));
-   socket.on('voice:send', (data) => this.handleVoiceSend(socket, data));
+  // Voice messages
+  socket.on(SOCKET_EVENTS.VOICE_RECORD, (data) => this.handleVoiceRecord(socket, data));
+  socket.on(SOCKET_EVENTS.VOICE_SEND, (data) => this.handleVoiceSend(socket, data));
 
-   // Games & Activities
-   socket.on('game:invite', (data) => this.handleGameInvite(socket, data));
-   socket.on('game:accept', (data) => this.handleGameAccept(socket, data));
-   socket.on('game:move', (data) => this.handleGameMove(socket, data));
+  // Games & Activities
+  socket.on(SOCKET_EVENTS.GAME_INVITE, (data) => this.handleGameInvite(socket, data));
+  socket.on(SOCKET_EVENTS.GAME_ACCEPT, (data) => this.handleGameAccept(socket, data));
+  socket.on(SOCKET_EVENTS.GAME_MOVE, (data) => this.handleGameMove(socket, data));
 
-   // Subscription events
-   socket.on('chat:subscribe', (data) => this.handleSubscribeToMatch(socket, data));
-   socket.on('chat:unsubscribe', (data) => this.handleUnsubscribeFromMatch(socket, data));
- }
+  // Subscription events
+  socket.on(SOCKET_EVENTS.CHAT_SUBSCRIBE, (data) => this.handleSubscribeToMatch(socket, data));
+  socket.on(SOCKET_EVENTS.CHAT_UNSUBSCRIBE, (data) => this.handleUnsubscribeFromMatch(socket, data));
+}
 
  /**
   * Handle sending a message

@@ -483,12 +483,51 @@ export const SOCKET_EVENTS = {
 
   // Messaging
   MESSAGE_SEND: "message:send",
+  MESSAGE_EDIT: "message:edit",
   MESSAGE_RECEIVE: "message:receive",
   MESSAGE_DELIVERED: "message:delivered",
   MESSAGE_READ: "message:read",
   MESSAGE_DELETED: "message:deleted",
+  MESSAGE_REACT: "message:react",
   TYPING_START: "typing:start",
   TYPING_STOP: "typing:stop",
+
+  // Voice/Video Calls
+  CALL_INITIATE: "call:initiate",
+  CALL_ACCEPT: "call:accept",
+  CALL_REJECT: "call:reject",
+  CALL_END: "call:end",
+  CALL_ICE_CANDIDATE: "call:ice-candidate",
+  CALL_SIGNAL: "call:signal",
+
+  // Media
+  MEDIA_UPLOAD: "media:upload",
+  MEDIA_DOWNLOAD: "media:download",
+
+  // Chat Management
+  CHAT_LOAD_HISTORY: "chat:load-history",
+  CHAT_CLEAR: "chat:clear",
+  CHAT_EXPORT: "chat:export",
+  CHAT_SEARCH: "chat:search",
+  CHAT_SUBSCRIBE: "chat:subscribe",
+  CHAT_UNSUBSCRIBE: "chat:unsubscribe",
+
+  // Presence
+  PRESENCE_UPDATE: "presence:update",
+  PRESENCE_GET: "presence:get",
+
+  // Location
+  LOCATION_SHARE: "location:share",
+  LOCATION_STOP: "location:stop",
+
+  // Voice Messages
+  VOICE_RECORD: "voice:record",
+  VOICE_SEND: "voice:send",
+
+  // Games & Activities
+  GAME_INVITE: "game:invite",
+  GAME_ACCEPT: "game:accept",
+  GAME_MOVE: "game:move",
 
   // Notifications
   NOTIFICATION_NEW: "notification:new",
