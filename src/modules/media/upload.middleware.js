@@ -760,7 +760,7 @@ export const uploadToDisk = multer({
 export const limits = FILE_LIMITS;
 
 // Export file type checking utilities
-export { getMediaType, ALLOWED_TYPES, BLOCKED_TYPES };
+export { getMediaType,  BLOCKED_TYPES };
 
 // Default exports
 export default {
