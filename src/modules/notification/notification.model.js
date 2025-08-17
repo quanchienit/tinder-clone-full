@@ -1,757 +1,476 @@
 // src/modules/notification/notification.model.js
 import mongoose from 'mongoose';
-import { NOTIFICATION_TYPES, NOTIFICATION_PRIORITY, NOTIFICATION_STATUS } from '../../config/constants.js';
+import { NOTIFICATION_TYPES, NOTIFICATION_PRIORITIES } from '../../config/constants.js';
 
-const { Schema } = mongoose;
+const notificationSchema = new mongoose.Schema(
+ {
+   // Recipient Information
+   recipient: {
+     type: mongoose.Schema.Types.ObjectId,
+     ref: 'User',
+     required: true,
+     index: true,
+   },
 
-/**
- * Notification Schema - Represents system notifications sent to users
- */
-const notificationSchema = new Schema(
-  {
-    // User who receives the notification
-    userId: {
-      type: Schema.Types.ObjectId,
-      ref: 'User',
-      required: true,
-      index: true,
-    },
+   // Sender Information (optional - system notifications may not have sender)
+   sender: {
+     type: mongoose.Schema.Types.ObjectId,
+     ref: 'User',
+     sparse: true,
+     index: true,
+   },
 
-    // Notification type
-    type: {
-      type: String,
-      enum: Object.values(NOTIFICATION_TYPES),
-      required: true,
-      index: true,
-    },
+   // Notification Type & Category
+   type: {
+     type: String,
+     required: true,
+     enum: Object.values(NOTIFICATION_TYPES),
+     index: true,
+   },
 
-    // Notification title
-    title: {
-      type: String,
-      required: true,
-      maxlength: 100,
-      trim: true,
-    },
+   category: {
+     type: String,
+     enum: ['match', 'message', 'social', 'system', 'promotion', 'security', 'subscription'],
+     default: 'system',
+     index: true,
+   },
 
-    // Notification body/content
-    body: {
-      type: String,
-      required: true,
-      maxlength: 500,
-      trim: true,
-    },
+   // Content
+   title: {
+     type: String,
+     required: true,
+     maxlength: 100,
+   },
 
-    // Additional data payload
-    data: {
-      // Match-related data
-      matchId: {
-        type: Schema.Types.ObjectId,
-        ref: 'Match',
-      },
-      otherUserId: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-      },
+   body: {
+     type: String,
+     required: true,
+     maxlength: 500,
+   },
 
-      // Message-related data
-      messageId: {
-        type: Schema.Types.ObjectId,
-        ref: 'Message',
-      },
-      chatId: {
-        type: Schema.Types.ObjectId,
-        ref: 'Match',
-      },
+   // Rich Media
+   media: {
+     imageUrl: {
+       type: String,
+       validate: {
+         validator: function (v) {
+           return !v || /^https?:\/\/.+\.(jpg|jpeg|png|gif|webp)$/i.test(v);
+         },
+         message: 'Invalid image URL format',
+       },
+     },
+     thumbnailUrl: String,
+     icon: {
+       type: String,
+       enum: ['heart', 'message', 'star', 'fire', 'gift', 'warning', 'info', 'success', 'error'],
+       default: 'info',
+     },
+   },
 
-      // Profile-related data
-      profileId: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-      },
-      photoId: String,
+   // Action & Navigation
+   action: {
+     type: {
+       type: String,
+       enum: ['navigate', 'deeplink', 'url', 'modal', 'none'],
+       default: 'none',
+     },
+     target: String, // Screen name, URL, or deeplink
+     params: mongoose.Schema.Types.Mixed, // Additional parameters for navigation
+   },
 
-      // Subscription-related data
-      subscriptionType: String,
-      planName: String,
-      amount: Number,
+   // Related Entities
+   relatedEntities: {
+     matchId: {
+       type: mongoose.Schema.Types.ObjectId,
+       ref: 'Match',
+       sparse: true,
+     },
+     messageId: {
+       type: mongoose.Schema.Types.ObjectId,
+       ref: 'Message',
+       sparse: true,
+     },
+     conversationId: {
+       type: mongoose.Schema.Types.ObjectId,
+       ref: 'Conversation',
+       sparse: true,
+     },
+     activityId: {
+       type: mongoose.Schema.Types.ObjectId,
+       sparse: true,
+     },
+   },
 
-      // Media data
-      mediaUrl: String,
-      thumbnailUrl: String,
+   // Delivery Status
+   status: {
+     read: {
+       type: Boolean,
+       default: false,
+       index: true,
+     },
+     readAt: Date,
+     delivered: {
+       type: Boolean,
+       default: false,
+     },
+     deliveredAt: Date,
+     clicked: {
+       type: Boolean,
+       default: false,
+     },
+     clickedAt: Date,
+   },
 
-      // Deep link data
-      screen: String,
-      params: Schema.Types.Mixed,
+   // Multi-channel Delivery Tracking
+   channels: {
+     inApp: {
+       sent: { type: Boolean, default: false },
+       sentAt: Date,
+       error: String,
+     },
+     push: {
+       sent: { type: Boolean, default: false },
+       sentAt: Date,
+       deviceTokens: [String],
+       fcmMessageId: String,
+       error: String,
+     },
+     email: {
+       sent: { type: Boolean, default: false },
+       sentAt: Date,
+       messageId: String,
+       error: String,
+     },
+     sms: {
+       sent: { type: Boolean, default: false },
+       sentAt: Date,
+       messageId: String,
+       error: String,
+     },
+   },
 
-      // Custom payload
-      custom: Schema.Types.Mixed,
-    },
+   // Priority & Scheduling
+   priority: {
+     type: String,
+     enum: Object.values(NOTIFICATION_PRIORITIES || ['low', 'normal', 'high', 'urgent']),
+     default: 'normal',
+     index: true,
+   },
 
-    // Notification priority
-    priority: {
-      type: String,
-      enum: Object.values(NOTIFICATION_PRIORITY),
-      default: NOTIFICATION_PRIORITY.NORMAL,
-      index: true,
-    },
+   scheduledFor: {
+     type: Date,
+     sparse: true,
+     index: true,
+   },
 
-    // Read status
-    status: {
-      isRead: {
-        type: Boolean,
-        default: false,
-        index: true,
-      },
-      readAt: Date,
-      isDelivered: {
-        type: Boolean,
-        default: false,
-      },
-      deliveredAt: Date,
-      isSent: {
-        type: Boolean,
-        default: false,
-      },
-      sentAt: Date,
-      isClicked: {
-        type: Boolean,
-        default: false,
-      },
-      clickedAt: Date,
-    },
+   expiresAt: {
+     type: Date,
+     sparse: true,
+     index: true,
+   },
 
-    // Delivery channels
-    channels: {
-      inApp: {
-        enabled: {
-          type: Boolean,
-          default: true,
-        },
-        delivered: {
-          type: Boolean,
-          default: false,
-        },
-        deliveredAt: Date,
-        error: String,
-      },
-      push: {
-        enabled: {
-          type: Boolean,
-          default: true,
-        },
-        delivered: {
-          type: Boolean,
-          default: false,
-        },
-        deliveredAt: Date,
-        messageId: String, // FCM message ID
-        error: String,
-        retryCount: {
-          type: Number,
-          default: 0,
-        },
-      },
-      email: {
-        enabled: {
-          type: Boolean,
-          default: false,
-        },
-        delivered: {
-          type: Boolean,
-          default: false,
-        },
-        deliveredAt: Date,
-        messageId: String, // Email service message ID
-        error: String,
-        retryCount: {
-          type: Number,
-          default: 0,
-        },
-      },
-      sms: {
-        enabled: {
-          type: Boolean,
-          default: false,
-        },
-        delivered: {
-          type: Boolean,
-          default: false,
-        },
-        deliveredAt: Date,
-        messageId: String, // SMS service message ID
-        error: String,
-        retryCount: {
-          type: Number,
-          default: 0,
-        },
-      },
-    },
+   // Grouping & Batching
+   groupId: {
+     type: String,
+     sparse: true,
+     index: true,
+   },
 
-    // Scheduling
-    scheduling: {
-      isScheduled: {
-        type: Boolean,
-        default: false,
-      },
-      scheduledFor: Date,
-      schedulingStatus: {
-        type: String,
-        enum: ['pending', 'sent', 'failed', 'cancelled'],
-        default: 'pending',
-      },
-      timezone: String,
-    },
+   batchId: {
+     type: String,
+     sparse: true,
+   },
 
-    // Expiry and auto-deletion
-    expiry: {
-      expiresAt: Date,
-      autoDelete: {
-        type: Boolean,
-        default: false,
-      },
-      deleteAfterRead: {
-        type: Boolean,
-        default: false,
-      },
-      retentionDays: {
-        type: Number,
-        default: 30,
-      },
-    },
+   // User Interaction
+   interactions: [{
+     action: {
+       type: String,
+       enum: ['viewed', 'clicked', 'dismissed', 'snoozed', 'marked_read'],
+     },
+     timestamp: {
+       type: Date,
+       default: Date.now,
+     },
+     metadata: mongoose.Schema.Types.Mixed,
+   }],
 
-    // Grouping for notification center
-    grouping: {
-      groupKey: String, // For grouping similar notifications
-      isGrouped: {
-        type: Boolean,
-        default: false,
-      },
-      groupCount: {
-        type: Number,
-        default: 1,
-      },
-      latestInGroup: {
-        type: Boolean,
-        default: true,
-      },
-    },
+   // Localization
+   locale: {
+     type: String,
+     default: 'en',
+   },
 
-    // User interaction tracking
-    interaction: {
-      isActionable: {
-        type: Boolean,
-        default: false,
-      },
-      actions: [
-        {
-          id: String,
-          label: String,
-          type: {
-            type: String,
-            enum: ['button', 'link', 'deeplink'],
-          },
-          url: String,
-          data: Schema.Types.Mixed,
-        },
-      ],
-      hasInteracted: {
-        type: Boolean,
-        default: false,
-      },
-      interactionType: String, // clicked, dismissed, etc.
-      interactedAt: Date,
-    },
+   translations: {
+     type: Map,
+     of: {
+       title: String,
+       body: String,
+     },
+   },
 
-    // Metadata
-    metadata: {
-      source: {
-        type: String,
-        enum: ['system', 'user_action', 'scheduled', 'campaign', 'automation'],
-        default: 'system',
-      },
-      campaign: {
-        id: String,
-        name: String,
-        type: String,
-      },
-      template: {
-        id: String,
-        version: String,
-      },
-      platform: {
-        type: String,
-        enum: ['ios', 'android', 'web', 'system'],
-      },
-      appVersion: String,
-      locale: {
-        type: String,
-        default: 'en',
-      },
-      triggeredBy: {
-        userId: {
-          type: Schema.Types.ObjectId,
-          ref: 'User',
-        },
-        event: String,
-        timestamp: Date,
-      },
-    },
+   // Additional Data
+   data: {
+     type: mongoose.Schema.Types.Mixed,
+     default: {},
+   },
 
-    // Admin and moderation
-    moderation: {
-      isReviewed: {
-        type: Boolean,
-        default: false,
-      },
-      reviewedAt: Date,
-      reviewedBy: {
-        type: Schema.Types.ObjectId,
-        ref: 'User',
-      },
-      isBlocked: {
-        type: Boolean,
-        default: false,
-      },
-      blockReason: String,
-      blockedAt: Date,
-    },
+   // Metadata
+   metadata: {
+     retryCount: {
+       type: Number,
+       default: 0,
+     },
+     lastRetryAt: Date,
+     source: {
+       type: String,
+       enum: ['system', 'user_action', 'scheduled', 'campaign', 'api'],
+       default: 'system',
+     },
+     campaignId: String,
+     templateId: String,
+     version: {
+       type: Number,
+       default: 1,
+     },
+   },
 
-    // Performance tracking
-    performance: {
-      deliveryAttempts: {
-        type: Number,
-        default: 0,
-      },
-      lastAttemptAt: Date,
-      nextRetryAt: Date,
-      processingTime: Number, // in milliseconds
-      deliveryTime: Number, // time to deliver after creation
-    },
-  },
-  {
-    timestamps: true,
-    collection: 'notifications',
-  }
+   // Soft Delete
+   isDeleted: {
+     type: Boolean,
+     default: false,
+     index: true,
+   },
+   deletedAt: Date,
+   deletedBy: {
+     type: mongoose.Schema.Types.ObjectId,
+     ref: 'User',
+   },
+ },
+ {
+   timestamps: true,
+   collection: 'notifications',
+ }
 );
 
-// ============================
-// Indexes
-// ============================
+// Compound Indexes for Performance
+notificationSchema.index({ recipient: 1, 'status.read': 1, createdAt: -1 });
+notificationSchema.index({ recipient: 1, type: 1, createdAt: -1 });
+notificationSchema.index({ recipient: 1, category: 1, 'status.read': 1 });
+notificationSchema.index({ scheduledFor: 1, 'status.delivered': 1 });
+notificationSchema.index({ expiresAt: 1 }, { expireAfterSeconds: 0 });
+notificationSchema.index({ groupId: 1, recipient: 1 });
+notificationSchema.index({ 'relatedEntities.matchId': 1 });
+notificationSchema.index({ 'relatedEntities.conversationId': 1 });
 
-// Compound indexes for efficient queries
-notificationSchema.index({ userId: 1, 'status.isRead': 1, createdAt: -1 });
-notificationSchema.index({ userId: 1, type: 1, createdAt: -1 });
-notificationSchema.index({ 'scheduling.scheduledFor': 1, 'scheduling.schedulingStatus': 1 });
-notificationSchema.index({ 'expiry.expiresAt': 1 });
-notificationSchema.index({ 'grouping.groupKey': 1, userId: 1, createdAt: -1 });
-notificationSchema.index({ priority: 1, createdAt: -1 });
-notificationSchema.index({ 'status.isDelivered': 1, 'channels.push.delivered': 1 });
-
-// TTL index for auto-deletion
-notificationSchema.index(
-  { 'expiry.expiresAt': 1 },
-  { 
-    expireAfterSeconds: 0,
-    partialFilterExpression: { 'expiry.autoDelete': true }
-  }
-);
-
-// ============================
-// Virtual Properties
-// ============================
-
-/**
- * Get formatted notification for display
- */
-notificationSchema.virtual('formatted').get(function () {
-  return {
-    id: this._id,
-    type: this.type,
-    title: this.title,
-    body: this.body,
-    data: this.data,
-    priority: this.priority,
-    isRead: this.status.isRead,
-    readAt: this.status.readAt,
-    createdAt: this.createdAt,
-    isActionable: this.interaction.isActionable,
-    actions: this.interaction.actions,
-  };
+// Virtual Fields
+notificationSchema.virtual('isRead').get(function () {
+ return this.status?.read === true;
 });
 
-/**
- * Check if notification is expired
- */
 notificationSchema.virtual('isExpired').get(function () {
-  return this.expiry.expiresAt && new Date() > this.expiry.expiresAt;
+ return this.expiresAt && this.expiresAt < new Date();
 });
 
-/**
- * Check if notification needs retry
- */
-notificationSchema.virtual('needsRetry').get(function () {
-  const maxRetries = 3;
-  return (
-    !this.status.isDelivered &&
-    this.performance.deliveryAttempts < maxRetries &&
-    (!this.performance.nextRetryAt || new Date() >= this.performance.nextRetryAt)
-  );
+notificationSchema.virtual('age').get(function () {
+ return Date.now() - this.createdAt.getTime();
 });
 
-// ============================
 // Instance Methods
-// ============================
+notificationSchema.methods.markAsRead = async function (userId) {
+ if (!this.status.read) {
+   this.status.read = true;
+   this.status.readAt = new Date();
+   
+   // Track interaction
+   this.interactions.push({
+     action: 'marked_read',
+     metadata: { userId },
+   });
 
-/**
- * Mark notification as read
- */
-notificationSchema.methods.markAsRead = async function () {
-  if (!this.status.isRead) {
-    this.status.isRead = true;
-    this.status.readAt = new Date();
-    
-    if (this.expiry.deleteAfterRead) {
-      // Schedule for deletion
-      this.expiry.expiresAt = new Date(Date.now() + 60000); // 1 minute
-    }
-    
-    await this.save();
-    
-    // Track metrics
-    const MetricsService = (await import('../../shared/services/metrics.service.js')).default;
-    await MetricsService.incrementCounter('notifications.read', 1, {
-      type: this.type,
-      priority: this.priority,
-    });
-  }
-  
-  return this;
+   await this.save();
+   return true;
+ }
+ return false;
 };
 
-/**
- * Mark notification as clicked
- */
-notificationSchema.methods.markAsClicked = async function (interactionType = 'clicked') {
-  this.status.isClicked = true;
-  this.status.clickedAt = new Date();
-  this.interaction.hasInteracted = true;
-  this.interaction.interactionType = interactionType;
-  this.interaction.interactedAt = new Date();
-  
-  await this.save();
-  
-  // Track metrics
-  const MetricsService = (await import('../../shared/services/metrics.service.js')).default;
-  await MetricsService.incrementCounter('notifications.clicked', 1, {
-    type: this.type,
-    priority: this.priority,
-    interactionType,
-  });
-  
-  return this;
+notificationSchema.methods.markAsDelivered = async function (channel) {
+ this.status.delivered = true;
+ this.status.deliveredAt = new Date();
+ 
+ if (channel && this.channels[channel]) {
+   this.channels[channel].sent = true;
+   this.channels[channel].sentAt = new Date();
+ }
+ 
+ await this.save();
 };
 
-/**
- * Update delivery status for a channel
- */
-notificationSchema.methods.updateDeliveryStatus = async function (channel, delivered, messageId = null, error = null) {
-  if (!this.channels[channel]) return this;
-  
-  this.channels[channel].delivered = delivered;
-  this.channels[channel].deliveredAt = delivered ? new Date() : null;
-  
-  if (messageId) {
-    this.channels[channel].messageId = messageId;
-  }
-  
-  if (error) {
-    this.channels[channel].error = error;
-    this.channels[channel].retryCount += 1;
-  }
-  
-  // Update overall delivery status
-  const anyDelivered = Object.values(this.channels).some(ch => ch.enabled && ch.delivered);
-  if (anyDelivered && !this.status.isDelivered) {
-    this.status.isDelivered = true;
-    this.status.deliveredAt = new Date();
-  }
-  
-  await this.save();
-  return this;
+notificationSchema.methods.recordClick = async function () {
+ if (!this.status.clicked) {
+   this.status.clicked = true;
+   this.status.clickedAt = new Date();
+   
+   this.interactions.push({
+     action: 'clicked',
+   });
+
+   await this.save();
+   return true;
+ }
+ return false;
 };
 
-/**
- * Check if notification should be sent via channel
- */
-notificationSchema.methods.shouldSendViaChannel = function (channel) {
-  return (
-    this.channels[channel].enabled &&
-    !this.channels[channel].delivered &&
-    this.channels[channel].retryCount < 3
-  );
+notificationSchema.methods.addInteraction = async function (action, metadata = {}) {
+ this.interactions.push({
+   action,
+   metadata,
+ });
+ 
+ await this.save();
 };
 
-// ============================
+notificationSchema.methods.softDelete = async function (userId) {
+ this.isDeleted = true;
+ this.deletedAt = new Date();
+ this.deletedBy = userId;
+ await this.save();
+};
+
 // Static Methods
-// ============================
-
-/**
- * Get unread count for user
- */
 notificationSchema.statics.getUnreadCount = async function (userId) {
-  return this.countDocuments({
-    userId,
-    'status.isRead': false,
-    'expiry.expiresAt': { $gt: new Date() },
-  });
+ return this.countDocuments({
+   recipient: userId,
+   'status.read': false,
+   isDeleted: false,
+   $or: [
+     { expiresAt: { $exists: false } },
+     { expiresAt: { $gt: new Date() } },
+   ],
+ });
 };
 
-/**
- * Get notifications for user with pagination
- */
-notificationSchema.statics.getUserNotifications = async function (userId, options = {}) {
-  const {
-    page = 1,
-    limit = 20,
-    type = null,
-    unreadOnly = false,
-    includeExpired = false,
-  } = options;
+notificationSchema.statics.getByCategory = async function (userId, category, options = {}) {
+ const {
+   limit = 20,
+   skip = 0,
+   unreadOnly = false,
+ } = options;
 
-  const query = { userId };
+ const query = {
+   recipient: userId,
+   category,
+   isDeleted: false,
+ };
 
-  if (type) {
-    query.type = type;
-  }
+ if (unreadOnly) {
+   query['status.read'] = false;
+ }
 
-  if (unreadOnly) {
-    query['status.isRead'] = false;
-  }
-
-  if (!includeExpired) {
-    query.$or = [
-      { 'expiry.expiresAt': { $exists: false } },
-      { 'expiry.expiresAt': { $gt: new Date() } },
-    ];
-  }
-
-  const skip = (page - 1) * limit;
-
-  const [notifications, total] = await Promise.all([
-    this.find(query)
-      .sort({ priority: -1, createdAt: -1 })
-      .skip(skip)
-      .limit(limit)
-      .populate('data.otherUserId', 'profile.firstName profile.displayName profile.photos')
-      .lean(),
-    this.countDocuments(query),
-  ]);
-
-  return {
-    notifications,
-    pagination: {
-      total,
-      page,
-      limit,
-      totalPages: Math.ceil(total / limit),
-      hasNext: page < Math.ceil(total / limit),
-      hasPrev: page > 1,
-    },
-  };
+ return this.find(query)
+   .sort({ createdAt: -1 })
+   .limit(limit)
+   .skip(skip)
+   .populate('sender', 'name avatar')
+   .lean();
 };
 
-/**
- * Mark all notifications as read for user
- */
-notificationSchema.statics.markAllAsRead = async function (userId) {
-  const result = await this.updateMany(
-    {
-      userId,
-      'status.isRead': false,
-    },
-    {
-      $set: {
-        'status.isRead': true,
-        'status.readAt': new Date(),
-      },
-    }
-  );
+notificationSchema.statics.markAllAsRead = async function (userId, filters = {}) {
+ const query = {
+   recipient: userId,
+   'status.read': false,
+   isDeleted: false,
+   ...filters,
+ };
 
-  // Track metrics
-  const MetricsService = (await import('../../shared/services/metrics.service.js')).default;
-  await MetricsService.incrementCounter('notifications.bulk_read', result.modifiedCount);
+ const result = await this.updateMany(
+   query,
+   {
+     $set: {
+       'status.read': true,
+       'status.readAt': new Date(),
+     },
+     $push: {
+       interactions: {
+         action: 'marked_read',
+         timestamp: new Date(),
+         metadata: { bulk: true },
+       },
+     },
+   }
+ );
 
-  return result.modifiedCount;
+ return result.modifiedCount;
 };
 
-/**
- * Get notifications ready for retry
- */
-notificationSchema.statics.getRetryNotifications = async function () {
-  const maxRetries = 3;
-  
-  return this.find({
-    'status.isDelivered': false,
-    'performance.deliveryAttempts': { $lt: maxRetries },
-    $or: [
-      { 'performance.nextRetryAt': { $exists: false } },
-      { 'performance.nextRetryAt': { $lte: new Date() } },
-    ],
-  }).limit(100);
+notificationSchema.statics.createBulk = async function (notifications) {
+ const bulkOps = notifications.map((notif) => ({
+   insertOne: {
+     document: {
+       ...notif,
+       createdAt: new Date(),
+       updatedAt: new Date(),
+     },
+   },
+ }));
+
+ return this.bulkWrite(bulkOps);
 };
 
-/**
- * Get scheduled notifications ready to send
- */
-notificationSchema.statics.getScheduledNotifications = async function () {
-  return this.find({
-    'scheduling.isScheduled': true,
-    'scheduling.schedulingStatus': 'pending',
-    'scheduling.scheduledFor': { $lte: new Date() },
-  });
+notificationSchema.statics.getGroupedNotifications = async function (userId, groupId) {
+ return this.find({
+   recipient: userId,
+   groupId,
+   isDeleted: false,
+ })
+   .sort({ createdAt: -1 })
+   .populate('sender', 'name avatar')
+   .lean();
 };
 
-/**
- * Clean up old notifications
- */
-notificationSchema.statics.cleanupOldNotifications = async function () {
-  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
-  
-  const result = await this.deleteMany({
-    $or: [
-      { 'expiry.expiresAt': { $lte: new Date() } },
-      {
-        createdAt: { $lte: thirtyDaysAgo },
-        'status.isRead': true,
-        'expiry.autoDelete': { $ne: false },
-      },
-    ],
-  });
-
-  return result.deletedCount;
+notificationSchema.statics.cleanupExpired = async function () {
+ const result = await this.deleteMany({
+   expiresAt: { $lt: new Date() },
+ });
+ 
+ return result.deletedCount;
 };
 
-/**
- * Get notification statistics
- */
-notificationSchema.statics.getStats = async function (dateRange = {}) {
-  const { start, end } = dateRange;
-  const query = {};
-
-  if (start || end) {
-    query.createdAt = {};
-    if (start) query.createdAt.$gte = start;
-    if (end) query.createdAt.$lte = end;
-  }
-
-  const [
-    total,
-    delivered,
-    read,
-    clicked,
-    byType,
-    byPriority,
-  ] = await Promise.all([
-    this.countDocuments(query),
-    this.countDocuments({ ...query, 'status.isDelivered': true }),
-    this.countDocuments({ ...query, 'status.isRead': true }),
-    this.countDocuments({ ...query, 'status.isClicked': true }),
-    this.aggregate([
-      { $match: query },
-      { $group: { _id: '$type', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-    ]),
-    this.aggregate([
-      { $match: query },
-      { $group: { _id: '$priority', count: { $sum: 1 } } },
-      { $sort: { count: -1 } },
-    ]),
-  ]);
-
-  const deliveryRate = total > 0 ? (delivered / total) * 100 : 0;
-  const readRate = delivered > 0 ? (read / delivered) * 100 : 0;
-  const clickRate = delivered > 0 ? (clicked / delivered) * 100 : 0;
-
-  return {
-    total,
-    delivered,
-    read,
-    clicked,
-    rates: {
-      delivery: Math.round(deliveryRate * 10) / 10,
-      read: Math.round(readRate * 10) / 10,
-      click: Math.round(clickRate * 10) / 10,
-    },
-    breakdown: {
-      byType: byType.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-      }, {}),
-      byPriority: byPriority.reduce((acc, item) => {
-        acc[item._id] = item.count;
-        return acc;
-      }, {}),
-    },
-  };
-};
-
-// ============================
 // Middleware
-// ============================
+notificationSchema.pre('save', function (next) {
+ // Auto-set category based on type if not set
+ if (!this.category && this.type) {
+   const typeCategories = {
+     [NOTIFICATION_TYPES.NEW_MATCH]: 'match',
+     [NOTIFICATION_TYPES.NEW_MESSAGE]: 'message',
+     [NOTIFICATION_TYPES.SUPER_LIKE]: 'social',
+     [NOTIFICATION_TYPES.PROFILE_VIEW]: 'social',
+     [NOTIFICATION_TYPES.SUBSCRIPTION_EXPIRING]: 'subscription',
+     [NOTIFICATION_TYPES.SECURITY_ALERT]: 'security',
+   };
+   
+   this.category = typeCategories[this.type] || 'system';
+ }
 
-/**
- * Pre-save middleware
- */
-notificationSchema.pre('save', async function (next) {
-  // Set default expiry if not set
-  if (this.isNew && !this.expiry.expiresAt && this.expiry.retentionDays) {
-    this.expiry.expiresAt = new Date(
-      Date.now() + this.expiry.retentionDays * 24 * 60 * 60 * 1000
-    );
-  }
-
-  // Generate group key for similar notifications
-  if (this.isNew && !this.grouping.groupKey) {
-    this.grouping.groupKey = `${this.type}_${this.userId}_${this.data.matchId || this.data.otherUserId || 'general'}`;
-  }
-
-  // Set scheduling status
-  if (this.scheduling.isScheduled && this.scheduling.scheduledFor > new Date()) {
-    this.scheduling.schedulingStatus = 'pending';
-  }
-
-  next();
+ next();
 });
 
-/**
- * Post-save middleware for real-time updates
- */
+// Post-save hook for real-time updates
 notificationSchema.post('save', async function (doc) {
-  if (doc.wasNew) {
-    // Emit real-time notification via Socket.io
-    try {
-      const socketManager = (await import('../../config/socket.js')).default;
-      socketManager.emitToUser(doc.userId.toString(), 'notification:new', doc.formatted);
-      
-      // Update unread count
-      const unreadCount = await this.constructor.getUnreadCount(doc.userId);
-      socketManager.emitToUser(doc.userId.toString(), 'notification:unread', { count: unreadCount });
-    } catch (error) {
-      // Silently fail for socket emissions
-    }
-
-    // Track metrics
-    const MetricsService = (await import('../../shared/services/metrics.service.js')).default;
-    await MetricsService.incrementCounter('notifications.created', 1, {
-      type: doc.type,
-      priority: doc.priority,
-    });
-  }
+ // Emit socket event for real-time notification
+ if (global.io) {
+   global.io.to(`user:${doc.recipient}`).emit('notification:new', {
+     _id: doc._id,
+     type: doc.type,
+     title: doc.title,
+     body: doc.body,
+     media: doc.media,
+     createdAt: doc.createdAt,
+   });
+ }
 });
 
-// ============================
-// Model Export
-// ============================
+// Plugins
+notificationSchema.plugin(mongooseLeanVirtuals);
 
 const Notification = mongoose.model('Notification', notificationSchema);
 
