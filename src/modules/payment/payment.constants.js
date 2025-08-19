@@ -44,22 +44,17 @@ export const BILLING_CYCLES = {
 // PAYMENT PROVIDERS
 // ========================
 export const PAYMENT_PROVIDERS = {
-  STRIPE: 'stripe',
   GOOGLE: 'google',
   APPLE: 'apple',
-  PAYPAL: 'paypal',
 };
 
 // ========================
 // PAYMENT METHODS
 // ========================
 export const PAYMENT_METHODS = {
-  CARD: 'card',
-  PAYPAL: 'paypal',
   APPLE_PAY: 'apple_pay',
   GOOGLE_PAY: 'google_pay',
-  BANK_TRANSFER: 'bank_transfer',
-  CRYPTO: 'crypto',
+  IN_APP_PURCHASE: 'in_app_purchase',
 };
 
 // ========================
@@ -312,45 +307,6 @@ export const ONE_TIME_PURCHASES = {
 };
 
 // ========================
-// STRIPE CONFIGURATION
-// ========================
-export const STRIPE_CONFIG = {
-  API_VERSION: '2023-10-16',
-  WEBHOOK_TOLERANCE: 300, // 5 minutes in seconds
-  PAYMENT_METHOD_TYPES: ['card'],
-  CURRENCY: 'usd',
-  SUCCESS_URL: `${process.env.FRONTEND_URL}/payment/success?session_id={CHECKOUT_SESSION_ID}`,
-  CANCEL_URL: `${process.env.FRONTEND_URL}/payment/cancel`,
-  BILLING_PORTAL_URL: `${process.env.FRONTEND_URL}/account/billing`,
-  
-  // Webhook events to handle
-  WEBHOOK_EVENTS: {
-    CHECKOUT_COMPLETED: 'checkout.session.completed',
-    CHECKOUT_EXPIRED: 'checkout.session.expired',
-    SUBSCRIPTION_CREATED: 'customer.subscription.created',
-    SUBSCRIPTION_UPDATED: 'customer.subscription.updated',
-    SUBSCRIPTION_DELETED: 'customer.subscription.deleted',
-    SUBSCRIPTION_TRIAL_ENDING: 'customer.subscription.trial_will_end',
-    PAYMENT_SUCCEEDED: 'payment_intent.succeeded',
-    PAYMENT_FAILED: 'payment_intent.payment_failed',
-    INVOICE_PAID: 'invoice.paid',
-    INVOICE_FAILED: 'invoice.payment_failed',
-    INVOICE_UPCOMING: 'invoice.upcoming',
-    CUSTOMER_UPDATED: 'customer.updated',
-    CHARGE_REFUNDED: 'charge.refunded',
-    CHARGE_DISPUTE_CREATED: 'charge.dispute.created',
-  },
-  
-  // Retry configuration
-  RETRY_CONFIG: {
-    MAX_ATTEMPTS: 3,
-    INITIAL_DELAY: 1000, // 1 second
-    MAX_DELAY: 10000, // 10 seconds
-    BACKOFF_MULTIPLIER: 2,
-  },
-};
-
-// ========================
 // GOOGLE PLAY CONFIGURATION
 // ========================
 export const GOOGLE_PLAY_CONFIG = {
@@ -473,15 +429,19 @@ export const APPLE_IAP_CONFIG = {
 // PAYMENT VALIDATION RULES
 // ========================
 export const PAYMENT_VALIDATION = {
-  MIN_AMOUNT: 50, // $0.50 in cents
-  MAX_AMOUNT: 999999, // $9,999.99 in cents
+  MIN_AMOUNT: 99,      // $0.99 minimum for app stores
+  MAX_AMOUNT: 99999,   // $999.99 maximum
   
-  CARD: {
-    NUMBER_LENGTH: [13, 19],
-    CVV_LENGTH: [3, 4],
-    EXPIRY_MONTH: [1, 12],
-    EXPIRY_YEAR_MIN: new Date().getFullYear(),
-    EXPIRY_YEAR_MAX: new Date().getFullYear() + 20,
+  // Remove CARD section completely
+  
+  RECEIPT: {
+    MAX_SIZE: 1024 * 1024, // 1MB max receipt size
+    ENCODING: 'base64',
+  },
+  
+  PURCHASE_TOKEN: {
+    MIN_LENGTH: 20,
+    MAX_LENGTH: 1000,
   },
   
   PROMO_CODE: {
@@ -492,6 +452,7 @@ export const PAYMENT_VALIDATION = {
   
   CURRENCY_CODES: ['USD', 'EUR', 'GBP', 'CAD', 'AUD', 'JPY', 'CNY', 'INR'],
 };
+
 
 // ========================
 // GRACE PERIOD CONFIGURATION
@@ -582,19 +543,25 @@ export const DISCOUNT_CONFIG = {
 // WEBHOOK SECURITY
 // ========================
 export const WEBHOOK_CONFIG = {
-  TIMEOUT: 20000, // 20 seconds
+  TIMEOUT: 20000,
   MAX_PAYLOAD_SIZE: '100kb',
   
   HEADERS: {
-    STRIPE_SIGNATURE: 'stripe-signature',
     GOOGLE_SIGNATURE: 'x-goog-signature',
     APPLE_SIGNATURE: 'x-apple-signature',
   },
   
   IP_WHITELIST: {
-    STRIPE: [], // Stripe doesn't use IP whitelisting
-    GOOGLE: ['66.102.0.0/20', '66.249.80.0/20'], // Google IP ranges
-    APPLE: ['17.0.0.0/8'], // Apple IP range
+    GOOGLE: ['66.102.0.0/20', '66.249.80.0/20'],
+    APPLE: ['17.0.0.0/8'],
+  },
+  
+  // Add retry configuration
+  RETRY: {
+    MAX_ATTEMPTS: 3,
+    INITIAL_DELAY: 1000,
+    MAX_DELAY: 10000,
+    BACKOFF_MULTIPLIER: 2,
   },
 };
 
@@ -653,21 +620,17 @@ export const PAYMENT_ERRORS = {
   SUBSCRIPTION_EXPIRED: 'Subscription has expired',
   CANNOT_CHANGE_PLAN: 'Cannot change plan at this time',
   
-  // Payment errors
-  PAYMENT_FAILED: 'Payment failed. Please try again',
-  CARD_DECLINED: 'Card was declined',
-  INSUFFICIENT_FUNDS: 'Insufficient funds',
-  CARD_EXPIRED: 'Card has expired',
-  INVALID_CARD: 'Invalid card information',
+  // Mobile-specific errors
+  PURCHASE_VERIFICATION_FAILED: 'Purchase verification failed',
+  RECEIPT_INVALID: 'Invalid receipt',
+  RECEIPT_ALREADY_USED: 'Receipt has already been used',
+  PURCHASE_CANCELLED: 'Purchase was cancelled',
+  PURCHASE_PENDING: 'Purchase is pending',
+  STORE_UNAVAILABLE: 'App store service unavailable',
   
   // Provider errors
   PROVIDER_ERROR: 'Payment provider error',
   PROVIDER_UNAVAILABLE: 'Payment provider is temporarily unavailable',
-  
-  // Verification errors
-  RECEIPT_INVALID: 'Invalid receipt',
-  RECEIPT_ALREADY_USED: 'Receipt has already been used',
-  VERIFICATION_FAILED: 'Payment verification failed',
   
   // Refund errors
   REFUND_PERIOD_EXPIRED: 'Refund period has expired',
@@ -707,7 +670,50 @@ export const PAYMENT_SUCCESS = {
   
   TRIAL_STARTED: 'Trial started successfully',
 };
+export const MOBILE_PAYMENT_CONFIG = {
+  // Common settings
+  VERIFICATION_TIMEOUT: 30000, // 30 seconds
+  MAX_RETRY_ATTEMPTS: 3,
+  CACHE_DURATION: {
+    RECEIPT: 3600,      // 1 hour
+    SUBSCRIPTION: 600,   // 10 minutes
+    PRODUCTS: 86400,     // 24 hours
+  },
+  
+  // Sandbox/Production detection
+  ENVIRONMENTS: {
+    PRODUCTION: 'production',
+    SANDBOX: 'sandbox',
+    TEST: 'test',
+  },
+  
+  // Common error codes
+  ERROR_CODES: {
+    PURCHASE_CANCELLED: 'purchase_cancelled',
+    PURCHASE_PENDING: 'purchase_pending', 
+    RECEIPT_INVALID: 'receipt_invalid',
+    RECEIPT_ALREADY_USED: 'receipt_already_used',
+    PRODUCT_NOT_FOUND: 'product_not_found',
+    SUBSCRIPTION_EXPIRED: 'subscription_expired',
+  },
+};
 
+export const STORE_URLS = {
+  APP_STORE: process.env.APP_STORE_URL || 'https://apps.apple.com/app/id123456789',
+  PLAY_STORE: process.env.PLAY_STORE_URL || 'https://play.google.com/store/apps/details?id=com.yourapp',
+  
+  // Subscription management URLs
+  MANAGE_SUBSCRIPTIONS: {
+    IOS: 'https://apps.apple.com/account/subscriptions',
+    ANDROID: 'https://play.google.com/store/account/subscriptions',
+  },
+  
+  // Support URLs
+  SUPPORT: {
+    IOS: 'https://support.apple.com/billing',
+    ANDROID: 'https://support.google.com/googleplay',
+  },
+};
 // ========================
 // EXPORTS
 // ========================
@@ -722,7 +728,6 @@ export default {
   SUBSCRIPTION_FEATURES_CONFIG,
   SUBSCRIPTION_PRICING,
   ONE_TIME_PURCHASES,
-  STRIPE_CONFIG,
   GOOGLE_PLAY_CONFIG,
   APPLE_IAP_CONFIG,
   PAYMENT_VALIDATION,

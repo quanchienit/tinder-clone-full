@@ -9,6 +9,8 @@ import morgan from 'morgan';
 import logger from './shared/utils/logger.js';
 // In main app.js
 import authRoutes from './modules/auth/auth.routes.js';
+// Import payment routes
+import paymentRoutes from './modules/payment/payment.routes.js';
 
 
 export function setupMiddleware(app) {
@@ -92,6 +94,32 @@ export function setupMiddleware(app) {
   });
   app.use('/api/auth', authRoutes);
   // Health check
+  // ============================
+// PAYMENT MODULE SETUP
+// ============================
+
+
+
+// Configure body parser với webhook exception
+app.use(express.json({
+  limit: '10mb',
+  verify: (req, res, buf, encoding) => {
+    // Store raw body for webhook signature verification
+    if (req.url && req.url.includes('/webhooks/')) {
+      req.rawBody = buf.toString(encoding || 'utf8');
+    }
+  },
+}));
+
+// Mount payment routes
+app.use('/api/payment', paymentRoutes);
+
+// Log payment module initialization
+logger.info('Payment module initialized', {
+  providers: ['google', 'apple'],
+  webhooksEnabled: true,
+  environment: process.env.NODE_ENV,
+});
   app.get('/health', (req, res) => {
     res.status(200).json({ 
       status: 'OK',

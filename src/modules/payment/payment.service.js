@@ -1,8 +1,10 @@
 // src/modules/payment/payment.service.js
 
-import Stripe from 'stripe';
+
 import { google } from 'googleapis';
-import crypto from 'crypto';
+
+import GooglePlayStrategy from './strategies/google.strategy.js';
+import AppleIAPStrategy from './strategies/apple.strategy.js';
 import Subscription from './subscription.model.js';
 import Transaction from './transaction.model.js';
 import User from '../user/user.model.js';
@@ -37,23 +39,18 @@ import CacheService from '../../shared/services/cache.service.js';
  * Handles all payment operations across different providers
  */
 class PaymentService {
-  constructor() {
-    // Initialize Stripe
-    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: STRIPE_CONFIG.API_VERSION,
-    });
+constructor() {
+  // Initialize strategies
+  this.googleStrategy = GooglePlayStrategy;
+  this.appleStrategy = AppleIAPStrategy;
 
-    // Initialize Google Play
-    this.initializeGooglePlay();
-
-    // Cache keys
-    this.cacheKeys = {
-      subscription: (userId) => `subscription:${userId}`,
-      transactions: (userId) => `transactions:${userId}`,
-      activePromos: 'promos:active',
-      prices: 'prices:current',
-    };
-  }
+  // Cache keys
+  this.cacheKeys = {
+    subscription: (userId) => `subscription:${userId}`,
+    transactions: (userId) => `transactions:${userId}`,
+    activePromos: 'promos:active',
+  };
+}
 
   /**
    * Initialize Google Play API
@@ -83,185 +80,27 @@ class PaymentService {
   /**
    * Create a new subscription
    */
-  async createSubscription(userId, { planType, billingCycle, paymentMethodId, provider = 'stripe', promoCode = null }) {
-    try {
-      logger.info('Creating subscription:', { userId, planType, billingCycle, provider });
-
-      // Check for existing active subscription
-      const existingSubscription = await Subscription.findActiveByUserId(userId);
-      if (existingSubscription) {
-        throw new AppError(PAYMENT_ERRORS.SUBSCRIPTION_ALREADY_EXISTS, 400);
-      }
-
-      // Get user
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new AppError('User not found', 404);
-      }
-
-      // Get pricing
-      const pricing = SUBSCRIPTION_PRICING[planType]?.[billingCycle];
-      if (!pricing) {
-        throw new AppError('Invalid plan or billing cycle', 400);
-      }
-
-      let subscriptionData = null;
-
-      // Process based on provider
-      switch (provider) {
-        case PAYMENT_PROVIDERS.STRIPE:
-          subscriptionData = await this.createStripeSubscription(user, planType, billingCycle, paymentMethodId, promoCode);
-          break;
-        
-        case PAYMENT_PROVIDERS.GOOGLE:
-          throw new AppError('Google Play subscriptions must be initiated from the app', 400);
-        
-        case PAYMENT_PROVIDERS.APPLE:
-          throw new AppError('Apple subscriptions must be initiated from the app', 400);
-        
-        default:
-          throw new AppError('Invalid payment provider', 400);
-      }
-
-      // Create subscription record
-      const subscription = await Subscription.create({
-        userId,
-        planType,
-        billingCycle,
-        provider,
-        status: subscriptionData.status,
-        providerSubscriptionId: subscriptionData.id,
-        providerCustomerId: subscriptionData.customerId,
-        currentPeriodStart: new Date(subscriptionData.currentPeriodStart * 1000),
-        currentPeriodEnd: new Date(subscriptionData.currentPeriodEnd * 1000),
-        amount: pricing.amount,
-        currency: pricing.currency,
-        trialEnd: subscriptionData.trialEnd ? new Date(subscriptionData.trialEnd * 1000) : null,
-        features: SUBSCRIPTION_FEATURES_CONFIG[planType],
-        metadata: {
-          source: 'web',
-          promoCode,
-        },
-      });
-
-      // Create transaction record
-      await this.createTransaction({
-        userId,
-        subscriptionId: subscription._id,
-        type: TRANSACTION_TYPES.SUBSCRIPTION,
-        amount: pricing.amount,
-        currency: pricing.currency,
-        status: TRANSACTION_STATUS.SUCCESS,
-        provider,
-        providerTransactionId: subscriptionData.latestInvoice,
-      });
-
-      // Update user
-      await user.updateSubscription({
-        type: planType,
-        validUntil: subscription.currentPeriodEnd,
-        paymentMethod: paymentMethodId,
-        stripeSubscriptionId: subscriptionData.id,
-      });
-
-      // Clear cache
-      await CacheService.invalidateUser(userId);
-
-      // Send notifications
-      await this.sendSubscriptionNotification(user, 'created', subscription);
-
-      // Track metrics
-      await MetricsService.trackEvent(PAYMENT_EVENTS.SUBSCRIPTION_STARTED, {
-        userId,
-        planType,
-        billingCycle,
-        amount: pricing.amount,
-        provider,
-      });
-
-      logger.info('Subscription created successfully:', subscription._id);
-
-      return {
-        success: true,
-        message: PAYMENT_SUCCESS.SUBSCRIPTION_CREATED,
-        subscription,
-      };
-    } catch (error) {
-      logger.error('Error creating subscription:', error);
-      throw error;
+async createSubscription(userId, { planType, billingCycle, provider, purchaseToken, receiptData }) {
+  try {
+    // Check for existing active subscription
+    const existingSubscription = await Subscription.findActiveByUserId(userId);
+    if (existingSubscription) {
+      throw new AppError(PAYMENT_ERRORS.SUBSCRIPTION_ALREADY_EXISTS, 400);
     }
-  }
 
-  /**
-   * Create Stripe subscription
-   */
-  async createStripeSubscription(user, planType, billingCycle, paymentMethodId, promoCode) {
-    try {
-      // Get or create Stripe customer
-      let customer;
-      if (user.subscription?.stripeCustomerId) {
-        customer = await this.stripe.customers.retrieve(user.subscription.stripeCustomerId);
-      } else {
-        customer = await this.stripe.customers.create({
-          email: user.email,
-          name: `${user.profile.firstName} ${user.profile.lastName}`,
-          metadata: {
-            userId: user._id.toString(),
-          },
-        });
-      }
-
-      // Attach payment method
-      await this.stripe.paymentMethods.attach(paymentMethodId, {
-        customer: customer.id,
-      });
-
-      // Set as default payment method
-      await this.stripe.customers.update(customer.id, {
-        invoice_settings: {
-          default_payment_method: paymentMethodId,
-        },
-      });
-
-      // Get or create price
-      const priceId = await this.getOrCreateStripePrice(planType, billingCycle);
-
-      // Apply promo code if provided
-      let discountId = null;
-      if (promoCode) {
-        discountId = await this.validateAndGetStripePromoCode(promoCode);
-      }
-
-      // Create subscription
-      const subscription = await this.stripe.subscriptions.create({
-        customer: customer.id,
-        items: [{ price: priceId }],
-        trial_period_days: SUBSCRIPTION_PRICING[planType][billingCycle].trialDays || 0,
-        payment_behavior: 'default_incomplete',
-        payment_settings: { save_default_payment_method: 'on_subscription' },
-        expand: ['latest_invoice.payment_intent'],
-        metadata: {
-          userId: user._id.toString(),
-          planType,
-          billingCycle,
-        },
-        ...(discountId && { discounts: [{ coupon: discountId }] }),
-      });
-
-      return {
-        id: subscription.id,
-        customerId: customer.id,
-        status: this.mapStripeStatus(subscription.status),
-        currentPeriodStart: subscription.current_period_start,
-        currentPeriodEnd: subscription.current_period_end,
-        trialEnd: subscription.trial_end,
-        latestInvoice: subscription.latest_invoice.id,
-      };
-    } catch (error) {
-      logger.error('Stripe subscription creation failed:', error);
-      throw new AppError(error.message, 400);
+    // Mobile subscriptions only
+    if (provider === PAYMENT_PROVIDERS.GOOGLE) {
+      throw new AppError('Google Play subscriptions must be initiated from the app', 400);
+    } else if (provider === PAYMENT_PROVIDERS.APPLE) {
+      throw new AppError('Apple subscriptions must be initiated from the app', 400);
+    } else {
+      throw new AppError('Invalid payment provider. Use Google Play or App Store', 400);
     }
+  } catch (error) {
+    logger.error('Error creating subscription:', error);
+    throw error;
   }
+}
 
   /**
    * Cancel subscription
@@ -279,9 +118,6 @@ class PaymentService {
 
       // Cancel based on provider
       switch (subscription.provider) {
-        case PAYMENT_PROVIDERS.STRIPE:
-          await this.cancelStripeSubscription(subscription.providerSubscriptionId, immediate);
-          break;
         
         case PAYMENT_PROVIDERS.GOOGLE:
           // Google subscriptions are cancelled on device
@@ -356,11 +192,6 @@ class PaymentService {
         throw new AppError('Cannot pause subscription', 400);
       }
 
-      // Pause based on provider
-      if (subscription.provider === PAYMENT_PROVIDERS.STRIPE) {
-        await this.pauseStripeSubscription(subscription.providerSubscriptionId, pauseUntil);
-      }
-
       // Update subscription
       subscription.status = SUBSCRIPTION_STATUS.PAUSED;
       subscription.pausedAt = new Date();
@@ -406,12 +237,6 @@ class PaymentService {
       if (!subscription) {
         throw new AppError('No paused subscription found', 404);
       }
-
-      // Resume based on provider
-      if (subscription.provider === PAYMENT_PROVIDERS.STRIPE) {
-        await this.resumeStripeSubscription(subscription.providerSubscriptionId);
-      }
-
       // Update subscription
       subscription.status = SUBSCRIPTION_STATUS.ACTIVE;
       subscription.pausedAt = null;
@@ -457,16 +282,6 @@ class PaymentService {
       const newPricing = SUBSCRIPTION_PRICING[newPlanType]?.[newBillingCycle];
       if (!newPricing) {
         throw new AppError('Invalid plan or billing cycle', 400);
-      }
-
-      // Update based on provider
-      if (subscription.provider === PAYMENT_PROVIDERS.STRIPE) {
-        await this.updateStripeSubscription(
-          subscription.providerSubscriptionId,
-          newPlanType,
-          newBillingCycle,
-          isUpgrade
-        );
       }
 
       // Update subscription
@@ -533,88 +348,43 @@ class PaymentService {
   /**
    * Purchase items (super likes, boosts, etc.)
    */
-  async purchaseItems(userId, { itemType, packSize, paymentMethodId, provider = 'stripe' }) {
-    try {
-      logger.info('Processing purchase:', { userId, itemType, packSize, provider });
+// Simplify purchaseItems - mobile only
+async purchaseItems(userId, { provider, purchaseToken, receiptData, productId }) {
+  try {
+    logger.info('Processing purchase:', { userId, provider, productId });
 
-      // Get pricing
-      const pricing = ONE_TIME_PURCHASES[itemType]?.[packSize];
-      if (!pricing) {
-        throw new AppError('Invalid item or pack size', 400);
-      }
-
-      // Get user
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new AppError('User not found', 404);
-      }
-
-      let paymentData = null;
-
-      // Process payment based on provider
-      switch (provider) {
-        case PAYMENT_PROVIDERS.STRIPE:
-          paymentData = await this.processStripePayment(user, pricing.amount, paymentMethodId, {
-            itemType,
-            packSize,
-            quantity: pricing.quantity,
-          });
-          break;
-        
-        default:
-          throw new AppError('Invalid payment provider', 400);
-      }
-
-      // Create transaction
-      const transaction = await this.createTransaction({
-        userId,
-        type: TRANSACTION_TYPES.PURCHASE,
-        amount: pricing.amount,
-        currency: 'USD',
-        status: TRANSACTION_STATUS.SUCCESS,
-        provider,
-        providerTransactionId: paymentData.id,
-        items: [{
-          type: itemType,
-          quantity: pricing.quantity,
-          unitPrice: pricing.unitPrice || pricing.amount / pricing.quantity,
-        }],
-      });
-
-      // Update user inventory
-      await this.updateUserInventory(userId, itemType, pricing.quantity);
-
-      // Send notification
-      await NotificationService.sendNotification(userId, {
-        type: 'purchase_complete',
-        title: 'Purchase Successful! 🎉',
-        body: `You've received ${pricing.quantity} ${itemType}`,
-        data: { itemType, quantity: pricing.quantity },
-      });
-
-      // Track metrics
-      await MetricsService.trackEvent(PAYMENT_EVENTS.PURCHASE_COMPLETED, {
-        userId,
-        itemType,
-        packSize,
-        amount: pricing.amount,
-        quantity: pricing.quantity,
-      });
-
-      return {
-        success: true,
-        message: PAYMENT_SUCCESS.PAYMENT_COMPLETED,
-        transaction,
-        items: {
-          type: itemType,
-          quantity: pricing.quantity,
-        },
-      };
-    } catch (error) {
-      logger.error('Error processing purchase:', error);
-      throw error;
+    const user = await User.findById(userId);
+    if (!user) {
+      throw new AppError('User not found', 404);
     }
+
+    let result = null;
+
+    // Process based on provider
+    switch (provider) {
+      case PAYMENT_PROVIDERS.GOOGLE:
+        result = await this.googleStrategy.verifyProductPurchase(userId, {
+          purchaseToken,
+          productId,
+        });
+        break;
+      
+      case PAYMENT_PROVIDERS.APPLE:
+        result = await this.appleStrategy.verifyReceipt(userId, {
+          receiptData,
+        });
+        break;
+        
+      default:
+        throw new AppError('Invalid payment provider', 400);
+    }
+
+    return result;
+  } catch (error) {
+    logger.error('Error processing purchase:', error);
+    throw error;
   }
+}
 
   // ========================
   // IN-APP PURCHASE VERIFICATION
@@ -769,14 +539,6 @@ class PaymentService {
       // Process refund based on provider
       let refundData = null;
       switch (transaction.provider) {
-        case PAYMENT_PROVIDERS.STRIPE:
-          refundData = await this.processStripeRefund(
-            transaction.providerTransactionId,
-            refundAmount,
-            reason
-          );
-          break;
-        
         default:
           throw new AppError('Refunds not supported for this provider', 400);
       }
@@ -831,83 +593,6 @@ class PaymentService {
       };
     } catch (error) {
       logger.error('Error processing refund:', error);
-      throw error;
-    }
-  }
-
-  // ========================
-  // PAYMENT METHODS
-  // ========================
-
-  /**
-   * Add payment method
-   */
-  async addPaymentMethod(userId, { type, token, setAsDefault = true }) {
-    try {
-      const user = await User.findById(userId);
-      if (!user) {
-        throw new AppError('User not found', 404);
-      }
-
-      // Get or create Stripe customer
-      let customerId = user.subscription?.stripeCustomerId;
-      if (!customerId) {
-        const customer = await this.stripe.customers.create({
-          email: user.email,
-          name: `${user.profile.firstName} ${user.profile.lastName}`,
-          metadata: { userId: user._id.toString() },
-        });
-        customerId = customer.id;
-      }
-
-      // Create payment method from token
-      const paymentMethod = await this.stripe.paymentMethods.create({
-        type: 'card',
-        card: { token },
-      });
-
-      // Attach to customer
-      await this.stripe.paymentMethods.attach(paymentMethod.id, {
-        customer: customerId,
-      });
-
-      // Set as default if requested
-      if (setAsDefault) {
-        await this.stripe.customers.update(customerId, {
-          invoice_settings: {
-            default_payment_method: paymentMethod.id,
-          },
-        });
-      }
-
-      return {
-        success: true,
-        message: PAYMENT_SUCCESS.PAYMENT_METHOD_ADDED,
-        paymentMethod: {
-          id: paymentMethod.id,
-          type: paymentMethod.type,
-          card: paymentMethod.card,
-        },
-      };
-    } catch (error) {
-      logger.error('Error adding payment method:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Remove payment method
-   */
-  async removePaymentMethod(userId, paymentMethodId) {
-    try {
-      await this.stripe.paymentMethods.detach(paymentMethodId);
-
-      return {
-        success: true,
-        message: PAYMENT_SUCCESS.PAYMENT_METHOD_REMOVED,
-      };
-    } catch (error) {
-      logger.error('Error removing payment method:', error);
       throw error;
     }
   }
@@ -989,236 +674,6 @@ class PaymentService {
       logger.error('Error sending subscription notification:', error);
     }
   }
-
-  /**
-   * Get or create Stripe price
-   */
-  async getOrCreateStripePrice(planType, billingCycle) {
-    try {
-      const pricing = SUBSCRIPTION_PRICING[planType][billingCycle];
-      const priceKey = `${planType}_${billingCycle}`;
-      
-      // Check cache
-      const cachedPriceId = await redis.get(`stripe:price:${priceKey}`);
-if (cachedPriceId) return cachedPriceId;
-
-     // Search for existing price
-     const prices = await this.stripe.prices.list({
-       product: process.env[`STRIPE_PRODUCT_${planType.toUpperCase()}`],
-       active: true,
-     });
-
-     const existingPrice = prices.data.find(
-       p => p.recurring?.interval === pricing.interval &&
-            p.recurring?.interval_count === pricing.intervalCount &&
-            p.unit_amount === pricing.amount
-     );
-
-     if (existingPrice) {
-       await redis.set(`stripe:price:${priceKey}`, existingPrice.id, 3600);
-       return existingPrice.id;
-     }
-
-     // Create new price
-     const price = await this.stripe.prices.create({
-       product: process.env[`STRIPE_PRODUCT_${planType.toUpperCase()}`],
-       unit_amount: pricing.amount,
-       currency: pricing.currency.toLowerCase(),
-       recurring: {
-         interval: pricing.interval,
-         interval_count: pricing.intervalCount,
-       },
-       metadata: {
-         planType,
-         billingCycle,
-       },
-     });
-
-     // Cache price ID
-     await redis.set(`stripe:price:${priceKey}`, price.id, 3600);
-     
-     return price.id;
-   } catch (error) {
-     logger.error('Error getting/creating Stripe price:', error);
-     throw error;
-   }
- }
-
- /**
-  * Validate and get Stripe promo code
-  */
- async validateAndGetStripePromoCode(code) {
-   try {
-     // Search for promotion code
-     const promoCodes = await this.stripe.promotionCodes.list({
-       code,
-       active: true,
-       limit: 1,
-     });
-
-     if (promoCodes.data.length === 0) {
-       throw new AppError(PAYMENT_ERRORS.PROMO_CODE_INVALID, 400);
-     }
-
-     const promoCode = promoCodes.data[0];
-
-     // Check if expired
-     if (promoCode.expires_at && promoCode.expires_at < Date.now() / 1000) {
-       throw new AppError(PAYMENT_ERRORS.PROMO_CODE_EXPIRED, 400);
-     }
-
-     // Check usage limits
-     if (promoCode.max_redemptions && 
-         promoCode.times_redeemed >= promoCode.max_redemptions) {
-       throw new AppError(PAYMENT_ERRORS.PROMO_CODE_ALREADY_USED, 400);
-     }
-
-     return promoCode.coupon.id;
-   } catch (error) {
-     if (error instanceof AppError) throw error;
-     logger.error('Error validating promo code:', error);
-     throw new AppError(PAYMENT_ERRORS.PROMO_CODE_INVALID, 400);
-   }
- }
-
- /**
-  * Process Stripe payment
-  */
- async processStripePayment(user, amount, paymentMethodId, metadata) {
-   try {
-     // Get or create customer
-     let customerId = user.subscription?.stripeCustomerId;
-     if (!customerId) {
-       const customer = await this.stripe.customers.create({
-         email: user.email,
-         name: `${user.profile.firstName} ${user.profile.lastName}`,
-         metadata: { userId: user._id.toString() },
-       });
-       customerId = customer.id;
-     }
-
-     // Create payment intent
-     const paymentIntent = await this.stripe.paymentIntents.create({
-       amount,
-       currency: 'usd',
-       customer: customerId,
-       payment_method: paymentMethodId,
-       confirm: true,
-       metadata: {
-         userId: user._id.toString(),
-         ...metadata,
-       },
-     });
-
-     if (paymentIntent.status !== 'succeeded') {
-       throw new AppError(PAYMENT_ERRORS.PAYMENT_FAILED, 400);
-     }
-
-     return {
-       id: paymentIntent.id,
-       amount: paymentIntent.amount,
-       status: paymentIntent.status,
-     };
-   } catch (error) {
-     logger.error('Stripe payment failed:', error);
-     throw new AppError(error.message || PAYMENT_ERRORS.PAYMENT_FAILED, 400);
-   }
- }
-
- /**
-  * Cancel Stripe subscription
-  */
- async cancelStripeSubscription(subscriptionId, immediate) {
-   try {
-     if (immediate) {
-       await this.stripe.subscriptions.del(subscriptionId);
-     } else {
-       await this.stripe.subscriptions.update(subscriptionId, {
-         cancel_at_period_end: true,
-       });
-     }
-   } catch (error) {
-     logger.error('Error cancelling Stripe subscription:', error);
-     throw error;
-   }
- }
-
- /**
-  * Pause Stripe subscription
-  */
- async pauseStripeSubscription(subscriptionId, resumeAt) {
-   try {
-     await this.stripe.subscriptions.update(subscriptionId, {
-       pause_collection: {
-         behavior: 'keep_as_draft',
-         resumes_at: Math.floor(resumeAt.getTime() / 1000),
-       },
-     });
-   } catch (error) {
-     logger.error('Error pausing Stripe subscription:', error);
-     throw error;
-   }
- }
-
- /**
-  * Resume Stripe subscription
-  */
- async resumeStripeSubscription(subscriptionId) {
-   try {
-     await this.stripe.subscriptions.update(subscriptionId, {
-       pause_collection: null,
-     });
-   } catch (error) {
-     logger.error('Error resuming Stripe subscription:', error);
-     throw error;
-   }
- }
-
- /**
-  * Update Stripe subscription
-  */
- async updateStripeSubscription(subscriptionId, newPlanType, newBillingCycle, immediate) {
-   try {
-     const priceId = await this.getOrCreateStripePrice(newPlanType, newBillingCycle);
-     
-     // Get current subscription
-     const subscription = await this.stripe.subscriptions.retrieve(subscriptionId);
-     
-     // Update subscription
-     await this.stripe.subscriptions.update(subscriptionId, {
-       items: [{
-         id: subscription.items.data[0].id,
-         price: priceId,
-       }],
-       proration_behavior: immediate ? 'always_invoice' : 'create_prorations',
-     });
-   } catch (error) {
-     logger.error('Error updating Stripe subscription:', error);
-     throw error;
-   }
- }
-
- /**
-  * Process Stripe refund
-  */
- async processStripeRefund(chargeId, amount, reason) {
-   try {
-     const refund = await this.stripe.refunds.create({
-       charge: chargeId,
-       amount,
-       reason: reason || 'requested_by_customer',
-     });
-
-     return {
-       id: refund.id,
-       amount: refund.amount,
-       status: refund.status,
-     };
-   } catch (error) {
-     logger.error('Stripe refund failed:', error);
-     throw error;
-   }
- }
 
  /**
   * Process verified purchase from IAP
@@ -1432,37 +887,6 @@ if (cachedPriceId) return cachedPriceId;
      return transactions;
    } catch (error) {
      logger.error('Error getting user transactions:', error);
-     throw error;
-   }
- }
-
- /**
-  * Get payment methods
-  */
- async getPaymentMethods(userId) {
-   try {
-     const user = await User.findById(userId);
-     if (!user?.subscription?.stripeCustomerId) {
-       return [];
-     }
-
-     const paymentMethods = await this.stripe.paymentMethods.list({
-       customer: user.subscription.stripeCustomerId,
-       type: 'card',
-     });
-
-     return paymentMethods.data.map(pm => ({
-       id: pm.id,
-       type: pm.type,
-       card: {
-         brand: pm.card.brand,
-         last4: pm.card.last4,
-         expMonth: pm.card.exp_month,
-         expYear: pm.card.exp_year,
-       },
-     }));
-   } catch (error) {
-     logger.error('Error getting payment methods:', error);
      throw error;
    }
  }

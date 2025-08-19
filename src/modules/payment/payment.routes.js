@@ -59,10 +59,18 @@ router.get(
  */
 router.post(
   '/subscription',
-  rateLimiter('payment', 5, 60), // 5 requests per minute
-  validate(createSubscriptionSchema),
-  clearCache(['subscription:*', 'user:*']),
-  PaymentController.createSubscription
+  rateLimiter('payment', 5, 60),
+  (req, res) => {
+    // Redirect to mobile app stores
+    return res.status(400).json({
+      success: false,
+      message: 'Please use the mobile app to manage subscriptions',
+      stores: {
+        ios: 'https://apps.apple.com/app/your-app-id',
+        android: 'https://play.google.com/store/apps/details?id=com.yourapp',
+      },
+    });
+  }
 );
 
 /**
@@ -149,10 +157,36 @@ router.get(
  * @desc    Make one-time purchase
  * @access  Private
  */
+const purchaseValidationSchema = Joi.object({
+  provider: Joi.string()
+    .valid('google', 'apple')
+    .required(),
+  
+  // Google fields
+  purchaseToken: Joi.when('provider', {
+    is: 'google',
+    then: Joi.string().required(),
+    otherwise: Joi.forbidden(),
+  }),
+  
+  productId: Joi.when('provider', {
+    is: 'google', 
+    then: Joi.string().required(),
+    otherwise: Joi.optional(),
+  }),
+  
+  // Apple fields
+  receiptData: Joi.when('provider', {
+    is: 'apple',
+    then: Joi.string().required(),
+    otherwise: Joi.forbidden(),
+  }),
+});
+
 router.post(
   '/purchase',
-  rateLimiter('payment', 10, 60), // 10 requests per minute
-  validate(purchaseItemsSchema),
+  rateLimiter('payment', 10, 60),
+  validate(purchaseValidationSchema),
   clearCache(['user:*']),
   PaymentController.purchaseItems
 );
@@ -333,63 +367,10 @@ router.get(
 );
 
 // ============================
-// BILLING PORTAL ROUTES
-// ============================
-
-/**
- * @route   POST /api/payment/billing-portal
- * @desc    Create Stripe billing portal session
- * @access  Private
- */
-router.post(
-  '/billing-portal',
-  rateLimiter('portal', 5, 60),
-  validate(createBillingPortalSchema),
-  PaymentController.createBillingPortalSession
-);
-
-// ============================
-// CHECKOUT ROUTES
-// ============================
-
-/**
- * @route   POST /api/payment/checkout
- * @desc    Create checkout session
- * @access  Private
- */
-router.post(
-  '/checkout',
-  rateLimiter('checkout', 5, 60),
-  PaymentController.createCheckoutSession
-);
-
-/**
- * @route   GET /api/payment/checkout/success
- * @desc    Handle checkout success
- * @access  Private
- */
-router.get(
-  '/checkout/success',
-  PaymentController.handleCheckoutSuccess
-);
-
-// ============================
 // WEBHOOK ROUTES (No authentication)
 // ============================
 
-/**
- * @route   POST /api/payment/webhooks/stripe
- * @desc    Stripe webhook endpoint
- * @access  Public (verified by signature)
- */
-router.post(
-  '/webhooks/stripe',
-  express.raw({ type: 'application/json' }), // Raw body for signature verification
-  asyncHandler(async (req, res) => {
-    const StripeWebhookHandler = await import('./webhooks/stripe.webhook.js');
-    return StripeWebhookHandler.default.handleWebhook(req, res);
-  })
-);
+
 
 /**
  * @route   POST /api/payment/webhooks/google

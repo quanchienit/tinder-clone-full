@@ -38,7 +38,6 @@ import logger from '../../shared/utils/logger.js';
 import { AppError } from '../../shared/utils/errors.js';
 import MetricsService from '../../shared/services/metrics.service.js';
 import CacheService from '../../shared/services/cache.service.js';
-import Stripe from 'stripe';
 
 /**
  * Payment Controller
@@ -46,9 +45,7 @@ import Stripe from 'stripe';
  */
 class PaymentController {
   constructor() {
-    this.stripe = new Stripe(process.env.STRIPE_SECRET_KEY, {
-      apiVersion: STRIPE_CONFIG.API_VERSION,
-    });
+
   }
 
   // ========================
@@ -59,30 +56,51 @@ class PaymentController {
    * Create subscription
    * @route POST /api/payment/subscription
    */
-  createSubscription = asyncHandler(async (req, res) => {
-    const userId = req.user._id.toString();
-    const { planType, billingCycle, paymentMethodId, provider, promoCode } = req.body;
+createSubscription = asyncHandler(async (req, res) => {
+  const userId = req.user._id.toString();
+  
+  return badRequestResponse(res, 
+    'Subscriptions must be purchased through the mobile app'
+  );
+});
 
-    logger.info('Creating subscription:', { userId, planType, billingCycle });
+// Update purchaseItems - mobile only
+purchaseItems = asyncHandler(async (req, res) => {
+  const userId = req.user._id.toString();
+  const { provider, purchaseToken, receiptData, productId } = req.body;
 
-    // Track initiation
-    await MetricsService.trackEvent('subscription_initiated', {
-      userId,
-      planType,
-      billingCycle,
-    });
+  logger.info('Processing mobile purchase:', { userId, provider });
 
-    const result = await PaymentService.createSubscription(userId, {
-      planType,
-      billingCycle,
-      paymentMethodId,
-      provider,
-      promoCode,
-    });
-
-    return successResponse(res, result, PAYMENT_SUCCESS.SUBSCRIPTION_CREATED, 201);
+  const result = await PaymentService.purchaseItems(userId, {
+    provider,
+    purchaseToken,
+    receiptData,
+    productId,
   });
 
+  return successResponse(res, result, PAYMENT_SUCCESS.PAYMENT_COMPLETED, 201);
+});
+
+// Update payment methods endpoints
+getPaymentMethods = asyncHandler(async (req, res) => {
+  // Mobile payments don't use stored payment methods
+  return successResponse(res, {
+    paymentMethods: [],
+    message: 'Payment methods are managed by app stores',
+  });
+});
+
+addPaymentMethod = asyncHandler(async (req, res) => {
+  return badRequestResponse(res, 
+    'Payment methods are managed through your app store account'
+  );
+});
+
+removePaymentMethod = asyncHandler(async (req, res) => {
+  return badRequestResponse(res, 
+    'Payment methods are managed through your app store account'
+  );
+});
   /**
    * Get current subscription
    * @route GET /api/payment/subscription
@@ -507,42 +525,6 @@ class PaymentController {
     return successResponse(res, transaction);
   });
 
-  /**
-   * Download invoice
-   * @route GET /api/payment/invoices/:invoiceId
-   */
-  downloadInvoice = asyncHandler(async (req, res) => {
-    const userId = req.user._id.toString();
-    const { invoiceId } = req.params;
-
-    // Verify invoice belongs to user
-    const user = await import('../user/user.model.js').then(m => m.default.findById(userId));
-    if (!user?.subscription?.stripeCustomerId) {
-      return forbiddenResponse(res, 'No billing account found');
-    }
-
-    try {
-      // Get invoice from Stripe
-      const invoice = await this.stripe.invoices.retrieve(invoiceId);
-      
-      // Verify invoice belongs to user
-      if (invoice.customer !== user.subscription.stripeCustomerId) {
-        return forbiddenResponse(res, 'Invoice not found');
-      }
-
-      // Return invoice PDF URL
-      return successResponse(res, {
-        invoiceUrl: invoice.invoice_pdf,
-        hostedUrl: invoice.hosted_invoice_url,
-        amount: invoice.amount_paid,
-        currency: invoice.currency,
-        date: new Date(invoice.created * 1000),
-      });
-    } catch (error) {
-      logger.error('Error retrieving invoice:', error);
-      return notFoundResponse(res, 'Invoice not found');
-    }
-  });
 
   // ========================
   // REFUNDS
@@ -670,129 +652,6 @@ class PaymentController {
         error: error.message,
       });
     }
-  });
-
-  // ========================
-  // BILLING PORTAL
-  // ========================
-
-  /**
-   * Create billing portal session
-   * @route POST /api/payment/billing-portal
-   */
-  createBillingPortalSession = asyncHandler(async (req, res) => {
-    const userId = req.user._id.toString();
-    const { returnUrl } = req.body;
-
-    const user = await import('../user/user.model.js').then(m => m.default.findById(userId));
-    
-    if (!user?.subscription?.stripeCustomerId) {
-      return badRequestResponse(res, 'No billing account found');
-    }
-
-    // Create Stripe billing portal session
-    const session = await this.stripe.billingPortal.sessions.create({
-      customer: user.subscription.stripeCustomerId,
-      return_url: returnUrl,
-    });
-
-    return successResponse(res, {
-      url: session.url,
-    });
-  });
-
-  // ========================
-  // CHECKOUT SESSIONS
-  // ========================
-
-  /**
-   * Create checkout session
-   * @route POST /api/payment/checkout
-   */
-  createCheckoutSession = asyncHandler(async (req, res) => {
-    const userId = req.user._id.toString();
-    const { planType, billingCycle, successUrl, cancelUrl } = req.body;
-
-    const user = await import('../user/user.model.js').then(m => m.default.findById(userId));
-    const { SUBSCRIPTION_PRICING } = await import('./payment.constants.js');
-    
-    const pricing = SUBSCRIPTION_PRICING[planType][billingCycle];
-    if (!pricing) {
-      return badRequestResponse(res, 'Invalid plan or billing cycle');
-    }
-
-    // Get or create Stripe customer
-    let customerId = user.subscription?.stripeCustomerId;
-    if (!customerId) {
-      const customer = await this.stripe.customers.create({
-        email: user.email,
-        name: `${user.profile.firstName} ${user.profile.lastName}`,
-        metadata: { userId: userId },
-      });
-      customerId = customer.id;
-    }
-
-    // Get price ID
-    const priceId = await PaymentService.getOrCreateStripePrice(planType, billingCycle);
-
-    // Create checkout session
-    const session = await this.stripe.checkout.sessions.create({
-      customer: customerId,
-      payment_method_types: ['card'],
-      line_items: [{
-        price: priceId,
-        quantity: 1,
-      }],
-      mode: 'subscription',
-      success_url: successUrl || STRIPE_CONFIG.SUCCESS_URL,
-      cancel_url: cancelUrl || STRIPE_CONFIG.CANCEL_URL,
-      allow_promotion_codes: true,
-      subscription_data: {
-        trial_period_days: pricing.trialDays || 0,
-        metadata: {
-          userId,
-          planType,
-          billingCycle,
-        },
-      },
-      metadata: {
-        userId,
-        planType,
-        billingCycle,
-      },
-    });
-
-    return successResponse(res, {
-      sessionId: session.id,
-      url: session.url,
-    });
-  });
-
-  /**
-   * Handle checkout success
-   * @route GET /api/payment/checkout/success
-   */
-  handleCheckoutSuccess = asyncHandler(async (req, res) => {
-    const { session_id } = req.query;
-
-    if (!session_id) {
-      return badRequestResponse(res, 'Session ID is required');
-    }
-
-    // Retrieve session from Stripe
-    const session = await this.stripe.checkout.sessions.retrieve(session_id, {
-      expand: ['subscription', 'customer'],
-    });
-
-    if (session.payment_status !== 'paid') {
-      return badRequestResponse(res, 'Payment not completed');
-    }
-
-    return successResponse(res, {
-      success: true,
-      subscription: session.subscription,
-      customer: session.customer,
-    });
   });
 
   // ========================
